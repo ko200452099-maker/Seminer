@@ -1,0 +1,736 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Asphaltenes seminar deck — 23 core + 2 backup slides, speaker notes, timing clocks."""
+
+from pptx import Presentation
+from pptx.util import Inches, Pt, Emu
+from pptx.dml.color import RGBColor
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.enum.shapes import MSO_SHAPE
+import os
+
+# ------------- palette (same visual language as the previous package) -------------
+NAVY   = RGBColor(0x10, 0x2A, 0x43)
+NAVY2  = RGBColor(0x1B, 0x3B, 0x5C)
+TEAL   = RGBColor(0x2E, 0x9B, 0xA6)
+AMBER  = RGBColor(0xE0, 0x9B, 0x2D)
+AMB_D  = RGBColor(0xA8, 0x6B, 0x00)
+GRAY   = RGBColor(0x5A, 0x66, 0x72)
+TEXT   = RGBColor(0x1C, 0x2B, 0x36)
+LIGHT  = RGBColor(0xF1, 0xF5, 0xF8)
+LIGHT2 = RGBColor(0xE4, 0xEC, 0xF2)
+WHITE  = RGBColor(0xFF, 0xFF, 0xFF)
+RED    = RGBColor(0xB4, 0x3B, 0x2E)
+
+FONT = "Calibri"
+SW, SH = Inches(13.333), Inches(7.5)
+FIGS = "/home/user/Seminar_Asphaltenes/_build/figs"
+
+prs = Presentation()
+prs.slide_width, prs.slide_height = SW, SH
+
+def blank_slide():
+    return prs.slides.add_slide(prs.slide_layouts[6])
+
+def box(slide, x, y, w, h):
+    tb = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
+    tf = tb.text_frame; tf.word_wrap = True
+    return tf
+
+def par(tf, text, size=16, bold=False, color=TEXT, first=False, align=PP_ALIGN.LEFT,
+        space_after=8, italic=False, line=1.02):
+    p = tf.paragraphs[0] if first else tf.add_paragraph()
+    p.alignment = align; p.space_after = Pt(space_after); p.line_spacing = line
+    r = p.add_run(); r.text = text
+    r.font.size = Pt(size); r.font.bold = bold; r.font.italic = italic
+    r.font.color.rgb = color; r.font.name = FONT
+    return p
+
+def rect(slide, x, y, w, h, fill=None, line=None, lw=1.0, shape=MSO_SHAPE.RECTANGLE, radius=None):
+    s = slide.shapes.add_shape(shape, Inches(x), Inches(y), Inches(w), Inches(h))
+    if fill is None: s.fill.background()
+    else: s.fill.solid(); s.fill.fore_color.rgb = fill
+    if line is None: s.line.fill.background()
+    else: s.line.color.rgb = line; s.line.width = Pt(lw)
+    s.shadow.inherit = False
+    if radius is not None and shape == MSO_SHAPE.ROUNDED_RECTANGLE:
+        try: s.adjustments[0] = radius
+        except Exception: pass
+    tf = s.text_frame; tf.word_wrap = True
+    tf.margin_left = Inches(0.12); tf.margin_right = Inches(0.12)
+    tf.margin_top = Inches(0.06); tf.margin_bottom = Inches(0.06)
+    return s, tf
+
+TARGETS = {1:15,2:45,3:35,4:35,5:35,6:20,7:35,8:40,9:35,10:45,11:40,12:45,13:55,
+           14:35,15:45,16:40,17:40,18:40,19:45,20:50,21:40,22:40,23:10}
+def clocks():
+    out = {}; c = 0
+    for n in range(1, 24):
+        c += TARGETS[n]; out[n] = f"{c//60}:{c%60:02d}"
+    return out
+CLK = clocks()
+print("total speaking plan:", sum(TARGETS.values()), "s =", f"{sum(TARGETS.values())//60}:{sum(TARGETS.values())%60:02d}")
+
+def header(slide, kicker, headline, n, target=None, clock=None, backup=False):
+    tf = box(slide, 0.62, 0.30, 12.1, 0.35)
+    par(tf, kicker, size=11.5, bold=True, color=TEAL, first=True, space_after=0)
+    tf2 = box(slide, 0.60, 0.56, 12.4, 0.95)
+    par(tf2, headline, size=24 if len(headline) < 95 else 22, bold=True, color=NAVY,
+        first=True, space_after=0, line=1.0)
+    rect(slide, 0.66, 1.545, 1.15, 0.055, fill=AMBER)
+    ftf = box(slide, 0.62, 7.06, 8.4, 0.3)
+    par(ftf, "Asphaltenes in production wellbores — flow assurance  ·  Seminar  ·  [Your name]",
+        size=9, color=GRAY, first=True, space_after=0)
+    rtf = box(slide, 8.9, 7.06, 3.8, 0.3)
+    label = ("BACKUP slide %d/25 — show only if asked" % n) if backup else \
+            ("Slide %d/25 · target %ds · clock %s" % (n, target, clock))
+    par(rtf, label, size=9, color=GRAY, first=True, space_after=0, align=PP_ALIGN.RIGHT)
+
+def notes(slide, text):
+    slide.notes_slide.notes_text_frame.text = text
+
+def table(slide, data, x, y, w, col_w=None, fs=12.5, hfs=12.5, row_h=0.36):
+    rows, cols = len(data), len(data[0])
+    gf = slide.shapes.add_table(rows, cols, Inches(x), Inches(y), Inches(w), Inches(row_h*rows))
+    tbl = gf.table; tbl.first_row = False; tbl.horz_banding = False
+    if col_w:
+        tot = sum(col_w)
+        for i, cw in enumerate(col_w):
+            tbl.columns[i].width = Emu(int(Inches(w) * cw / tot))
+    for r in range(rows):
+        for c in range(cols):
+            cell = tbl.cell(r, c); cell.text_frame.word_wrap = True
+            cell.margin_left = Inches(0.08); cell.margin_right = Inches(0.06)
+            cell.margin_top = Inches(0.02); cell.margin_bottom = Inches(0.02)
+            cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+            p = cell.text_frame.paragraphs[0]
+            run = p.add_run(); run.text = str(data[r][c])
+            run.font.name = FONT; run.font.size = Pt(hfs if r == 0 else fs)
+            run.font.bold = (r == 0)
+            run.font.color.rgb = WHITE if r == 0 else TEXT
+            if r == 0: cell.fill.solid(); cell.fill.fore_color.rgb = NAVY
+            else:
+                cell.fill.solid()
+                cell.fill.fore_color.rgb = WHITE if r % 2 == 1 else LIGHT
+    return tbl
+
+# =========================================================
+# 1 — TITLE
+# =========================================================
+s = blank_slide()
+rect(s, 0, 0, 13.333, 7.5, fill=WHITE)
+rect(s, 0, 0, 0.30, 7.5, fill=NAVY)
+rect(s, 0.30, 0, 0.10, 7.5, fill=AMBER)
+tf = box(s, 1.0, 0.72, 11.4, 0.4)
+par(tf, "SEMINAR  ·  PETROLEUM AND GAS ENGINEERING  ·  [COURSE CODE]", size=12.5, bold=True,
+    color=TEAL, first=True, space_after=0)
+tf = box(s, 1.0, 1.22, 11.3, 2.3)
+par(tf, "Asphaltenes: Predicting and Preventing Wellbore Plugging", size=38, bold=True,
+    color=NAVY, first=True, space_after=4, line=1.0)
+par(tf, "Flow assurance in production wellbores — and the seed of my graduation project",
+    size=19, color=GRAY, space_after=0, line=1.05)
+tf = box(s, 1.0, 4.00, 6.6, 2.5)
+par(tf, "Presenter:  [Your full name]   ·   ID [xxxxxx]", size=15, color=TEXT, first=True, space_after=6)
+par(tf, "Supervisor:  [Prof. name]", size=15, color=TEXT, space_after=6)
+par(tf, "Programme:  BSc Petroleum and Gas Engineering — [University]", size=15, color=TEXT, space_after=6)
+par(tf, "[Month] 2026   ·   15-minute presentation   ·   23 slides + 2 backup", size=15, color=TEAL, space_after=0)
+r, t = rect(s, 8.1, 4.00, 4.2, 2.3, fill=LIGHT, line=LIGHT2, shape=MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.06)
+par(t, "ONE-LINE SUMMARY", size=11, bold=True, color=TEAL, first=True, space_after=4)
+par(t, "Field engineers call asphaltenes the cholesterol of crude oil. This seminar shows when they block wells, how we predict it — and the project that will quantify it for a real case.",
+    size=13, color=TEXT, space_after=0, line=1.1)
+notes(s, """TARGET 15 s (clock 0:15).
+[EDIT] Replace all bracketed placeholders.
+Opening lines, memorised verbatim: "Good morning. My name is [—]. In fifteen minutes I will show you how the heaviest fraction of crude oil can choke a well to death — and how we can predict it before it happens." """)
+
+# =========================================================
+# 2 — WHY IT MATTERS (numbers)
+# =========================================================
+s = blank_slide()
+header(s, "PART 1 · THE PROBLEM", "Asphaltenes are a billion-dollar flow-assurance problem", 2, 45, CLK[2])
+cards = [
+    ("billions $/yr", "estimated industry-wide cost: lost production, remediation, chemicals [1]"),
+    ("≈ $70 M", "shut-in and cleanup for ONE deepwater Gulf of Mexico well [1]"),
+    ("up to $1.2 M/day", "deferred-production loss during a plugging event [2]"),
+    ("1/3 to 2/3", "of tubing radius: measured deposit thickness in severe field cases [3]"),
+]
+x = 0.62
+for big, cap in cards:
+    r, t = rect(s, x, 1.80, 2.94, 1.95, fill=LIGHT, line=TEAL, lw=1.2,
+                shape=MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.07)
+    par(t, big, size=23, bold=True, color=NAVY, first=True, space_after=4, align=PP_ALIGN.CENTER)
+    par(t, cap, size=10.5, color=GRAY, space_after=0, align=PP_ALIGN.CENTER, line=1.05)
+    x += 3.10
+tf = box(s, 0.62, 4.00, 12.1, 2.7)
+par(tf, "Field quote to set up the talk: when production pressure drops, the heaviest molecules in the crude crash out of solution and build a hard, tar-like deposit that chokes the tubing.",
+    size=14.5, first=True, space_after=8)
+par(tf, "It is not an exotic failure mode: asphaltenes are managed somewhere in the world every single day — from the North Sea to the Gulf of Mexico to the Algerian Sahara.",
+    size=14.5, space_after=8)
+par(tf, "The recurring sting is not only the money — it is that plugging arrives unplanned, and the industry's default answers are reactive.",
+    size=14.5, space_after=8)
+par(tf, "So the question of this seminar: can we predict WHERE it will deposit — before the well chokes?",
+    size=15, bold=True, color=NAVY, space_after=0)
+notes(s, """TARGET 45 s (clock 1:00).
+[VERIFY] Ref [1] = ACS Energy & Fuels review, "Review of Asphaltenes in an Electric Field" (2021): industry-wide billions + $70M/well GoM shut-in. Ref [2] = MDPI Processes review "Mitigation of Asphaltene Deposit Formation via Chemical Additives" (2025): up to $1.2M/day. Ref [3] = Hassi Messaoud field data (SPE-994-PA) and related case papers: deposits ≈ 2/3 of tubing radius.
+Delivery: land each number slowly; the $70 M and $1.2 M/day figures do the heavy lifting.""")
+
+# =========================================================
+# 3 — WHAT ARE ASPHALTENES
+# =========================================================
+s = blank_slide()
+header(s, "PART 1 · THE PROBLEM", "What are asphaltenes? The heaviest, most polar fraction of crude — held in suspension", 3, 35, CLK[3])
+tf = box(s, 0.62, 1.80, 7.4, 4.9)
+items = [
+    ("Operational definition (not one molecule, but a solubility class):", "insoluble in n-heptane, soluble in toluene — the basis of the SARA analysis (Saturates · Aromatics · Resins · Asphaltenes) [VERIFY]: ASTM D6560 / IP 143."),
+    ("Why they stay in the oil:", "aromatic-rich resins act as the stabilising shell around asphaltene nano-aggregates; the crude is stable as long as that dispersion is maintained."),
+    ("Why the nickname fits:", "field engineers call them the cholesterol of crude oil — and like cholesterol, the danger is not their presence, it is precipitation from circulation."),
+    ("Scale:", "typically a few per cent of the oil by weight — enough to plug a well completely."),
+]
+for i, (a, b) in enumerate(items):
+    par(tf, "▪  " + a, size=14.5, bold=True, color=NAVY, first=(i == 0), space_after=2)
+    par(tf, b, size=13.5, color=TEXT, space_after=10, line=1.05)
+r, t = rect(s, 8.25, 2.00, 4.45, 3.3, fill=LIGHT, line=TEAL, lw=1.5, shape=MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.06)
+par(t, "THE STABILITY PICTURE", size=12.5, bold=True, color=TEAL, first=True, space_after=8, align=PP_ALIGN.CENTER)
+par(t, "asphaltene\n(aggregate core)", size=13.5, bold=True, color=NAVY, space_after=2, align=PP_ALIGN.CENTER)
+par(t, "↓ surrounded by ↓", size=13, color=GRAY, space_after=2, align=PP_ALIGN.CENTER)
+par(t, "resins + aromatics\n(solvating shell)", size=13.5, bold=True, color=TEAL, space_after=8, align=PP_ALIGN.CENTER)
+par(t, "Disturb the shell → instability → precipitation", size=12.5, italic=True, color=RED, space_after=0, align=PP_ALIGN.CENTER)
+notes(s, """TARGET 35 s (clock 1:35).
+Key correction to make explicitly (committees test this): asphaltenes do not "keep the oil stable" — they are kept dispersed BY resins and aromatics.
+[VERIFY] Confirm the exact standard number your course uses for the SARA/heptane-precipitation test (ASTM D6560 / IP 143) and cite it on the slide.""")
+
+# =========================================================
+# 4 — VISUAL EVIDENCE + IMPACT
+# =========================================================
+s = blank_slide()
+header(s, "PART 1 · THE PROBLEM", "This is what it looks like inside the tubing", 4, 35, CLK[4])
+s.shapes.add_picture(os.path.join(FIGS, "plugged_tubing.png"), Inches(0.62), Inches(1.78),
+                     width=Inches(3.05), height=Inches(4.575))
+tf = box(s, 0.62, 6.42, 3.05, 0.5)
+par(tf, "Technical rendering — illustrative, not a field photograph. Replace with your own cased photograph if permitted.",
+    size=8.5, italic=True, color=GRAY, first=True, space_after=0, line=1.05)
+tf = box(s, 4.05, 1.85, 8.7, 4.9)
+items = [
+    ("Flow area shrinks.", "Documented case: effective tubing ID reduced from 2.3 in to 1.35 in — a loss of roughly two-thirds of the flow area [4]."),
+    ("Pressure is consumed downhole.", "Extra ΔP across the deposit; in severe field cases wells lost 20–25 % of wellhead pressure within 15–20 days [3]."),
+    ("Production declines, then stops.", "First a slow rate loss, then complete blockage — a well can cease flowing within days of first production."),
+    ("The failure is invisible until it is expensive.", "No downhole window: by the time the wellhead pressure signature is obvious, the deposit is already thick."),
+]
+for i, (a, b) in enumerate(items):
+    p = par(tf, "▪  " + a, size=14.5, bold=True, color=NAVY, first=(i == 0), space_after=2)
+    par(tf, b, size=13.5, color=TEXT, space_after=10, line=1.05)
+notes(s, """TARGET 35 s (clock 2:10).
+[VERIFY] Ref [4] = the documented deepwater GoM well (JPT/SPE, 2021) — tubing ID 2.3 in → 1.35 in from transient multiphase modelling. Ref [3] = Hassi Messaoud (SPE-994-PA): 20–25 % wellhead pressure loss in 15–20 days.
+Delivery: point at the flow restriction in the image: "this is a pipe that still has a hole in it — for now." """)
+
+# =========================================================
+# 5 — OBJECTIVE & SCOPE
+# =========================================================
+s = blank_slide()
+header(s, "PART 1 · THE PROBLEM", "Objective: explain the mechanism, review the defenses, propose the project", 5, 35, CLK[5])
+labels = [
+    ("1 · EXPLAIN", "what destabilises asphaltenes, and the chain from precipitation to deposition", TEAL),
+    ("2 · REVIEW", "today's defenses — and why they are mostly reactive", AMBER),
+    ("3 · PROPOSE", "the graduation project: predicting onset depth and injection point for a real well", NAVY2),
+]
+x = 0.62
+for lab, txt, col in labels:
+    r, t = rect(s, x, 1.85, 3.95, 2.5, fill=WHITE, line=col, lw=1.6,
+                shape=MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.06)
+    par(t, lab, size=16, bold=True, color=col, first=True, space_after=8)
+    par(t, txt, size=14, color=TEXT, space_after=0, line=1.08)
+    x += 4.13
+r, t = rect(s, 0.62, 4.70, 12.1, 1.15, fill=LIGHT, line=None, shape=MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.10)
+par(t, "Scope statement:  this is a flow-assurance review and a feasibility study for the thesis — not a completed field intervention study.",
+    size=14.5, bold=True, color=NAVY, first=True, space_after=4)
+par(t, "Saying this out loud protects you in the Q&A: the committee knows exactly what you claim and what you do not.",
+    size=12.5, italic=True, color=GRAY, space_after=0)
+notes(s, """TARGET 35 s (clock 2:45).
+Key message: three verbs — explain, review, propose. The scope statement is your shield.
+Delivery: same discipline as a good paper abstract: promise less, deliver exactly.""")
+
+# =========================================================
+# 6 — ROADMAP
+# =========================================================
+s = blank_slide()
+header(s, "PART 1 · THE PROBLEM", "How the next 14 minutes are organised", 6, 20, CLK[6])
+rows = [
+    ("PART 1", "The problem: what asphaltenes are, and what they cost", "0:00 – 2:45"),
+    ("PART 2", "The science: stability, triggers, and the P–T envelope", "2:45 – 6:20"),
+    ("PART 3", "Field evidence: a documented deepwater case study", "6:20 – 9:20"),
+    ("PART 4", "Defenses then and now — and the economics of prevention", "9:20 – 11:20"),
+    ("PART 5", "The graduation project: prediction workflow and plan", "11:20 – 14:25"),
+]
+y = 1.85
+for p, t, c in rows:
+    r, tfr = rect(s, 0.62, y, 12.1, 0.85, fill=LIGHT if p != "PART 5" else LIGHT2,
+                  line=None, shape=MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.12)
+    par(tfr, p + "    " + t, size=15.5, bold=(p != "PART 5"), color=NAVY if p != "PART 5" else NAVY2,
+        first=True, space_after=0)
+    tbx = box(s, 10.4, y + 0.24, 2.2, 0.4)
+    par(tbx, c, size=13, bold=True, color=TEAL, first=True, space_after=0, align=PP_ALIGN.RIGHT)
+    y += 0.98
+notes(s, """TARGET 20 s (clock 3:05).
+Five parts, not four — the field case study gets its own part because the audience needs to see real evidence before hearing about defenses.
+Delivery: fast and confident; do not linger.""")
+
+# =========================================================
+# 7 — WHAT KEEPS OIL STABLE
+# =========================================================
+s = blank_slide()
+header(s, "PART 2 · THE SCIENCE", "Stability is a fragile balance — pressure, temperature and composition all pull on it", 7, 35, CLK[7])
+tf = box(s, 0.62, 1.80, 6.3, 4.9)
+items = [
+    ("Two engineering views, one working rule:", "the colloidal picture (aggregates protected by resins) and the solubility picture (asphaltenes dissolve best in aromatic, high-density fluids)."),
+    ("For field screening we use solubility parameters:", "Hildebrand-type reasoning, condensed into the Colloidal Instability Index: CII ≈ (Saturates + Asphaltenes) / (Resins + Aromatics) [5].  Higher CII → less stable crude."),
+    ("Three levers move the balance:", "pressure, temperature, and composition (adding gas/condensate changes the solvent quality of the oil)."),
+    ("Engineering consequence:", "anything that lightens the oil or drops its pressure pushes the system toward instability."),
+]
+for i, (a, b) in enumerate(items):
+    par(tf, "▪  " + a, size=14, bold=True, color=NAVY, first=(i == 0), space_after=2)
+    par(tf, b, size=13, color=TEXT, space_after=9, line=1.05)
+r, t = rect(s, 7.15, 1.90, 5.55, 3.6, fill=LIGHT, line=NAVY2, lw=1.3, shape=MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.05)
+par(t, "THE THREE LEVERS", size=13, bold=True, color=NAVY2, first=True, space_after=10, align=PP_ALIGN.CENTER)
+par(t, "PRESSURE ↓", size=17, bold=True, color=RED, space_after=2, align=PP_ALIGN.CENTER)
+par(t, "main trigger — loss of light-end solvency as P falls", size=12, color=GRAY, space_after=10, align=PP_ALIGN.CENTER)
+par(t, "COMPOSITION changed", size=17, bold=True, color=RED, space_after=2, align=PP_ALIGN.CENTER)
+par(t, "gas lift, gas breakthrough, CO₂ / rich-gas injection, commingling", size=12, color=GRAY, space_after=10, align=PP_ALIGN.CENTER)
+par(t, "TEMPERATURE", size=17, bold=True, color=AMB_D, space_after=2, align=PP_ALIGN.CENTER)
+par(t, "secondary modifier — shifts the envelope, direction is oil-specific", size=12, color=GRAY, space_after=0, align=PP_ALIGN.CENTER)
+tf = box(s, 7.15, 5.65, 5.55, 1.0)
+par(tf, "Next: the classic misconception — that solids dropping out is a cooling story. For asphaltenes it is mostly a pressure-and-composition story.",
+    size=12.5, italic=True, color=GRAY, first=True, space_after=0, line=1.1)
+notes(s, """TARGET 35 s (clock 3:40).
+[VERIFY] Ref [5] = Colloidal Instability Index (CII) from the SARA-based screening literature — cite the specific paper your library can access; thresholds vary by laboratory (commonly ≈ 0.9 cited as the instability boundary).
+Delivery: keep the "two views, one working rule" framing — it shows you read beyond a single textbook.""")
+
+# =========================================================
+# 8 — ASPHALTENES vs WAX
+# =========================================================
+s = blank_slide()
+header(s, "PART 2 · THE SCIENCE", "Asphaltenes are not wax — the trigger, the physics and the fix all differ", 8, 40, CLK[8])
+data = [
+    ["", "Paraffin wax", "Asphaltenes"],
+    ["Main trigger", "temperature falls below the wax appearance temperature (WAT)", "pressure falls below the onset pressure; composition change"],
+    ["Nature of the solid", "crystalline — it can melt", "amorphous — it does not remelt; thermal methods largely fail"],
+    ["Where solids appear", "in flowlines and surface lines, cold spots", "wherever the flowing P–T path crosses the envelope — often deep in the tubing"],
+    ["Deposition mechanism", "diffusion + shear; hard wax layer grows inward", "adhesion of flocculated aggregates; can form throughout the flow path"],
+    ["Removal", "hot oil, thermal insulation, scrapers", "aromatic solvents (toluene/xylene), milling, dispersants"],
+    ["Inhibition", "crystal modifiers / pour-point depressants", "polymeric dispersants (inhibitors) injected continuously below the onset"],
+]
+table(s, data, 0.62, 1.75, 12.1, col_w=[2.5, 4.6, 5.0], fs=11.5, hfs=12, row_h=0.62)
+tf = box(s, 0.62, 6.35, 12.1, 0.6)
+par(tf, "Temperature does matter for asphaltenes — but as a modifier of the envelope, not as the primary trigger. Juries test this distinction.",
+    size=13, italic=True, color=GRAY, first=True, space_after=0)
+notes(s, """TARGET 40 s (clock 4:20).
+Key message: wax = cooling story; asphaltenes = pressure/composition story. This single slide is the credibility marker of the seminar.
+Delivery: do not read rows; say only three contrasts — trigger, nature of the solid, removal.""")
+
+# =========================================================
+# 9 — MECHANISM CHAIN
+# =========================================================
+s = blank_slide()
+header(s, "PART 2 · THE SCIENCE", "From stable oil to plugged tubing: four steps — and the critical distinction", 9, 35, CLK[9])
+steps = [
+    ("1 · PRECIPITATION", "Thermodynamic. The oil crosses the envelope and asphaltenes separate from solution as nano-aggregates.", RED),
+    ("2 · FLOCCULATION", "Particles stick together into larger, irregular clusters.", AMB_D),
+    ("3 · AGGREGATION", "Clusters grow; some can approach millimetre scale.", TEAL),
+    ("4 · DEPOSITION", "Particles adhere to the steel and form a deposit — balanced by shear removal.", NAVY2),
+]
+x = 0.62
+for lab, txt, col in steps:
+    r, t = rect(s, x, 1.85, 2.94, 2.75, fill=WHITE, line=col, lw=1.6,
+                shape=MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.06)
+    par(t, lab, size=14, bold=True, color=col, first=True, space_after=8)
+    par(t, txt, size=12.5, color=TEXT, space_after=0, line=1.08)
+    x += 3.10
+r, t = rect(s, 0.62, 4.85, 12.1, 1.5, fill=LIGHT, line=RED, lw=1.4, shape=MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.08)
+par(t, "The distinction that separates understanding from theory:", size=13.5, bold=True, color=RED, first=True, space_after=4)
+par(t, "Precipitation ≠ deposition. Many wells carry precipitated asphaltenes to surface with no deposit at all — deposition is a transport phenomenon on top of the thermodynamic one, governed by adhesion, particle size and shear. This is exactly where prediction is weakest today.",
+    size=13, color=TEXT, space_after=0, line=1.08)
+notes(s, """TARGET 35 s (clock 4:55).
+Key message: four steps, but the exam-grade point is step 4 — deposition is not automatic after precipitation.
+Delivery: slow down on the red box; this idea returns in the gap analysis (slide 18) and the Q&A.""")
+
+# =========================================================
+# 10 — STABILITY ENVELOPE (chart A)
+# =========================================================
+s = blank_slide()
+header(s, "PART 2 · THE SCIENCE", "The asphaltene envelope: a pressure–temperature map of where the oil is safe", 10, 45, CLK[10])
+s.shapes.add_picture(os.path.join(FIGS, "envelope_pt.png"), Inches(4.62), Inches(1.80),
+                     width=Inches(8.15), height=Inches(4.46))
+tf = box(s, 0.62, 1.85, 3.75, 4.9)
+items = [
+    ("AOP:", "asphaltene onset pressure — above it the oil is stable."),
+    ("Above the bubble point:", "for problematic oils the AOP can sit well above Pb — often 100–200 bar or more [6]. De Boer screening: if AOP > Pb, treat the field as asphaltene-prone."),
+    ("Unstable region:", "below the AOP line, precipitation is thermodynamically possible."),
+    ("The flowing path:", "as oil rises, P and T fall together — when the path crosses the AOP, onset occurs."),
+    ("Lower AOP:", "some oils show a second onset at low pressure — outside today's scope, noted on the backup slide."),
+]
+for i, (a, b) in enumerate(items):
+    p = par(tf, "▪  " + a, size=12.5, bold=True, color=NAVY, first=(i == 0), space_after=2)
+    par(tf, b, size=12, color=TEXT, space_after=7, line=1.03)
+notes(s, """TARGET 45 s (clock 5:40).
+[VERIFY] Ref [6] = asphaltene onset typically 100–200 bar above the bubble point for unstable oils (as documented in NeqSim's asphaltene screening notes and standard de Boer screening literature — cite the textbook/paper you rely on).
+Delivery: trace the path with the pointer: reservoir → star (onset) → wellhead. This chart is your central technical exhibit.""")
+
+# =========================================================
+# 11 — SCREENING & MEASUREMENT
+# =========================================================
+s = blank_slide()
+header(s, "PART 2 · THE SCIENCE", "How risk is measured: screening first, onset measurement second", 11, 40, CLK[11])
+data = [
+    ["Method", "What it gives you", "Practical role"],
+    ["SARA analysis", "the four fractions; feeds CII and solubility modelling", "first-pass screen on any new crude"],
+    ["CII / stability indices", "a single number: stable vs unstable tendency", "flags the crude before any lab work [5]"],
+    ["De Boer plot", "AOP vs bubble point vs reservoir pressure", "field-level screening; if AOP > Pb, expect problems [6]"],
+    ["Heptane titration (ASTM D6703-type)", "the asphaltene precipitation onset in titrations", "quantitative ranking of crudes and blends"],
+    ["High-pressure onset measurement (NIR / light scattering in a PVT cell)", "the AOP as a function of temperature — the input a simulator must match", "the calibration anchor for every model [VERIFY]"],
+]
+table(s, data, 0.62, 1.78, 12.1, col_w=[3.6, 5.5, 3.8], fs=11.5, hfs=12, row_h=0.62)
+tf = box(s, 0.62, 6.10, 12.1, 0.8)
+par(tf, "The best field practice uses several: a screening number for early decisions, and a measured AOP curve to calibrate the prediction. My project uses both.",
+    size=13, italic=True, color=GRAY, first=True, space_after=0, line=1.08)
+notes(s, """TARGET 40 s (clock 6:20).
+[VERIFY] Confirm the exact standard numbers for the titration method against the version available in your library; the automated heptane-titration technique is commonly referenced as ASTM D6703.
+Delivery: three methods maximum if pressed for time — SARA, CII, AOP measurement.""")
+
+# =========================================================
+# 12 — TRIGGERS  (CHECKPOINT 1)
+# =========================================================
+s = blank_slide()
+header(s, "PART 2 · THE SCIENCE", "What triggers it in the wellbore — and where deposits actually form", 12, 45, CLK[12])
+tf = box(s, 0.62, 1.80, 6.15, 4.9)
+items = [
+    ("The pressure drop is the main trigger.", "As oil flows up the tubing the pressure falls; when the path crosses the AOP, precipitation begins."),
+    ("Gas lift changes the solvent.", "Light injected gas strips resins from the asphaltene surface — the oil loses solvency and destabilises."),
+    ("Gas breakthrough / CO₂ and rich-gas injection", "shift the envelope; CO₂ is a well-documented destabiliser."),
+    ("Commingling and blending", "mixing crudes or condensates that are individually stable can create an unstable mixture."),
+    ("Acid jobs and workovers", "spent acids and introduced fluids can destabilise the near-well region."),
+]
+for i, (a, b) in enumerate(items):
+    p = par(tf, "▪  " + a, size=13.5, bold=True, color=NAVY, first=(i == 0), space_after=2)
+    par(tf, b, size=12.5, color=TEXT, space_after=6, line=1.03)
+r, t = rect(s, 7.0, 1.85, 5.7, 4.35, fill=LIGHT, line=RED, lw=1.5, shape=MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.05)
+par(t, "CORRECTING A CLASSIC MISCONCEPTION", size=12.5, bold=True, color=RED, first=True, space_after=8)
+par(t, "“Deposits form at the top of the well, where the pressure drops fastest.”  Not true — the pressure gradient along the tubing is roughly steady, so the deposit forms wherever the flowing path first crosses the envelope. In deep, hot wells that is often TENS of metres — sometimes a kilometre — below the wellhead.",
+    size=13, color=TEXT, space_after=8, line=1.08)
+par(t, "Why it matters: that depth decides where you inject inhibitor — and the field case study (next slide) shows what happens when the injection point is too shallow.",
+    size=13, bold=True, color=NAVY, space_after=0, line=1.08)
+notes(s, """TARGET 45 s (clock 7:05) — CHECKPOINT 1: you should be on this slide at 7:05.
+Key message: five triggers, one dominant (pressure), and a misconception corrected that sets up the case study.
+Delivery: the misconception box is the pivot of the whole talk — deliver it as a small revelation.""")
+
+# =========================================================
+# 13 — CASE STUDY (chart B)  (CHECKPOINT 2)
+# =========================================================
+s = blank_slide()
+header(s, "PART 3 · FIELD EVIDENCE", "Documented case: a deepwater well where the injection point sat above the onset", 13, 55, CLK[13])
+s.shapes.add_picture(os.path.join(FIGS, "depth_prediction.png"), Inches(4.62), Inches(1.80),
+                     width=Inches(8.15), height=Inches(4.46))
+tf = box(s, 0.62, 1.85, 3.75, 4.9)
+items = [
+    ("The well:", "deepwater Gulf of Mexico; perforations at 17,700–18,000 ft; chemical injection mandrel at 14,600 ft [4]."),
+    ("The problem:", "high AOP — within reservoir conditions; 3,400 ft of tubing BELOW the mandrel had no chemical protection."),
+    ("What the model showed:", "effective tubing ID reduced from 2.3 in to 1.35 in while producing."),
+    ("The fix:", "aromatic solvent soak, then continuous inhibitor — initially 750 ppm, stabilised near 500 ppm."),
+    ("The result:", "+16 % production over 4 months, including the shut-in time [4]."),
+]
+for i, (a, b) in enumerate(items):
+    p = par(tf, "▪  " + a, size=12.5, bold=True, color=NAVY, first=(i == 0), space_after=2)
+    par(tf, b, size=11.5, color=TEXT, space_after=6, line=1.03)
+tf = box(s, 0.62, 6.55, 12.1, 0.45)
+par(tf, "This chart is my illustrative P–T model, anchored to the case well's geometry — predicted onset ≈ 4,750 m, roughly 300 m BELOW the existing mandrel. [VERIFY] rebuild with the field's own PVT data in the thesis.",
+    size=9, italic=True, color=GRAY, first=True, space_after=0, line=1.05)
+notes(s, """TARGET 55 s (clock 8:00) — CHECKPOINT 2: on this slide at 8:00.
+[VERIFY] Ref [4] = JPT/SPE (2021) "Asphaltenes: A Complex and Challenging Flow Assurance Issue" — all case numbers (17,700–18,000 ft, 14,600 ft mandrel, 3,400 ft, 2.3→1.35 in, 750→500 ppm, +16 %).
+Delivery: the punchline is geometric — the well HAD inhibition, but 3,400 ft of tubing sat below it. Prediction of onset depth is not academic; it is the difference between protected and unprotected steel.""")
+
+# =========================================================
+# 14 — DETECTION & SURVEILLANCE
+# =========================================================
+s = blank_slide()
+header(s, "PART 4 · DEFENSES", "Detecting the problem before the well chokes", 14, 35, CLK[14])
+tf = box(s, 0.62, 1.80, 12.1, 4.9)
+items = [
+    ("Rate and pressure trends:", "a rising ΔP for the same rate (ΔP/Q) is the earliest fingerprint of a growing deposit."),
+    ("Wellhead signature:", "in severe fields, wells lose 20–25 % of wellhead pressure within 15–20 days — a clean, quantitative alarm [3]."),
+    ("Wireline gauge rings / calipers:", "the classic direct measurement — successive runs map the deposit profile and volume so treatment volumes can be calculated (the Hassi Messaoud practice) [3]."),
+    ("Sampling and field analysis:", "downhole and surface samples with optical/spectroscopic analysis of asphaltene content — used in the documented deepwater case to tune inhibitor dosage in near-real time [4]."),
+    ("Well monitoring + periodic CT cleanouts:", "used as a deliberate surveillance strategy in wells where prevention alone is not trusted [4]."),
+]
+for i, (a, b) in enumerate(items):
+    p = par(tf, "▪  " + a, size=14.5, bold=True, color=NAVY, first=(i == 0), space_after=2)
+    par(tf, b, size=13.5, color=TEXT, space_after=10, line=1.05)
+notes(s, """TARGET 35 s (clock 8:35).
+Key message: surveillance is cheap compared with a surprise plugging — and it produces the data your prediction model needs to be validated.
+Delivery: name the ΔP/Q fingerprint and the gauge-ring method; both are real field practice.""")
+
+# =========================================================
+# 15 — REACTIVE DEFENSES & WHY THEY FAIL
+# =========================================================
+s = blank_slide()
+header(s, "PART 4 · DEFENSES", "The reactive toolkit — effective, expensive, and temporary", 15, 45, CLK[15])
+data = [
+    ["Method", "How it works", "Why it is not the answer"],
+    ["Wireline scrapers / cutting", "mechanical removal of the deposit from tubing", "slow, impractical in bad wells; routine scraping was 'expensive and cumbersome' at Hassi Messaoud [3]"],
+    ["Coiled-tubing milling / jetting", "mechanical cleanout of the full string", "rig-up + NPT; the well is shut in while it happens"],
+    ["Aromatic solvent washes (toluene / xylene)", "dissolves the deposit; volume calculated from gauge-ring profile", "HSE exposure (BTEX), flammability, cost; only a temporary fix — deposits return"],
+    ["Acid / stimulation jobs", "dissolve scale around the near-wellbore", "can destabilise the crude and worsen asphaltene damage — used with great care"],
+    ["Thermal methods", "heat the deposit", "amorphous deposits do not remelt — largely ineffective vs wax-like expectations"],
+]
+table(s, data, 0.62, 1.78, 12.1, col_w=[3.3, 4.2, 5.4], fs=11, hfs=11.5, row_h=0.78)
+tf = box(s, 0.62, 6.35, 12.1, 0.6)
+par(tf, "Pattern: every reactive method is a cleanout — and every cleanout is NPT, deferred production and a repeat visit scheduled by the physics itself.",
+    size=13, bold=True, color=NAVY, first=True, space_after=0)
+notes(s, """TARGET 45 s (clock 9:20).
+[VERIFY] Ref [3] = Hassi Messaoud, SPE-994-PA (1965) — the 'expensive and cumbersome' assessment of scraper/solvent practice; still the canonical field description.
+Delivery: do not read all five rows — wireline, solvents at Hassi Messaoud, and the acid warning are enough.""")
+
+# =========================================================
+# 16 — PROACTIVE: CONTINUOUS INHIBITION
+# =========================================================
+s = blank_slide()
+header(s, "PART 4 · DEFENSES", "The proactive answer: keep the asphaltenes dispersed — don't let them land", 16, 40, CLK[16])
+tf = box(s, 0.62, 1.80, 7.5, 4.9)
+items = [
+    ("Chemical inhibitors (dispersants):", "polymer/surfactant molecules adsorb onto asphaltene aggregates and keep them suspended in the oil, so they flow to surface instead of sticking to steel. They do not dissolve deposits — they prevent formation."),
+    ("Delivery: capillary / chemical injection string", "— thin tubing clamped to the production string, injecting continuously at the required depth, with a surface dosing pump and monitoring."),
+    ("Dosage is field-specific:", "hundreds to a few thousand ppm; in the documented deepwater case, 750 ppm high-dose initial treatment stabilised to ≈ 500 ppm [4]."),
+    ("Placement rule — the lesson of Part 3:", "the injection point must sit DEEPER than the shallowest predicted onset depth; designing it from a rule of thumb leaves tubing unprotected."),
+    ("Chemical-free alternative worth noting:", "recycling dead oil into the well to restore solvent quality — promising, still developing [7]."),
+]
+for i, (a, b) in enumerate(items):
+    p = par(tf, "▪  " + a, size=13.5, bold=True, color=NAVY, first=(i == 0), space_after=2)
+    par(tf, b, size=12.5, color=TEXT, space_after=7, line=1.03)
+r, t = rect(s, 8.35, 2.00, 4.35, 3.7, fill=LIGHT, line=TEAL, lw=1.4, shape=MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.05)
+par(t, "WHY PROACTIVE CHANGES THE ECONOMICS", size=12.5, bold=True, color=TEAL, first=True, space_after=8)
+par(t, "No rig-up. No deferred production. No repeat workover cycle. The well keeps producing while the problem is managed continuously — which is why operators increasingly choose inhibition where cleanout frequency would exceed roughly one event per year.",
+    size=12.5, color=TEXT, space_after=0, line=1.08)
+notes(s, """TARGET 40 s (clock 10:00).
+[VERIFY] Ref [7] = dead-oil re-injection mitigation study (Fuel / ScienceDirect, 2020). Ref [4] = dosage numbers from the deepwater case (JPT/SPE 2021).
+Delivery: the placement rule is the bridge from the case study to your project — say it as a design principle, not an anecdote.""")
+
+# =========================================================
+# 17 — ECONOMICS  (CHECKPOINT 3)
+# =========================================================
+s = blank_slide()
+header(s, "PART 4 · DEFENSES", "The business case: reactive cleanouts vs continuous inhibition", 17, 40, CLK[17])
+data = [
+    ["Cost element", "Reactive approach", "Proactive approach"],
+    ["Routine cost", "cleanout per event; documented treatment costs up to ~$3 M [2]", "inhibitor: ≈ $31–46 k/well/yr (Middle East) to $330–390 k/well/yr (GoM) [8]"],
+    ["Deferred production", "up to ~$1.2 M/day during a plugging/shut-in event [2]", "near zero — the well keeps producing"],
+    ["Catastrophic tail", "single-well shut-in + cleanup ≈ $70 M (deepwater GoM) [1]", "residual risk only if dosage/placement is wrong"],
+    ["Frequency", "scheduled by the physics — deposits return", "managed continuously; occasional CT verification runs"],
+]
+table(s, data, 0.62, 1.78, 12.1, col_w=[2.6, 4.9, 4.6], fs=11.5, hfs=12, row_h=0.72)
+r, t = rect(s, 0.62, 5.55, 12.1, 1.15, fill=LIGHT, line=AMBER, lw=1.3, shape=MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.10)
+par(t, "The thesis adds the missing number: a breakeven model — at what cleanout frequency, for a given well, does continuous inhibition pay for itself? Engineers and economists still argue this case by rule of thumb.",
+    size=13, bold=True, color=NAVY, first=True, space_after=3)
+par(t, "Note: the ranges span different fields and years — cite each figure with its source and context, never as a single 'industry cost'.",
+    size=11.5, italic=True, color=GRAY, space_after=0)
+notes(s, """TARGET 40 s (clock 10:40) — CHECKPOINT 3: on this slide at 10:40.
+[VERIFY] Ref [1] ACS review 2021 ($70M); [2] MDPI review 2025 ($1.2M/day, up to $3M treatment); [8] inhibitor cost ranges from both reviews (Middle East vs Gulf of Mexico).
+Delivery: the honest caveat at the bottom builds more credibility than any single number.""")
+
+# =========================================================
+# 18 — GAP ANALYSIS
+# =========================================================
+s = blank_slide()
+header(s, "PART 5 · TOWARD THE THESIS", "Gap analysis: prediction is still the weak link", 18, 40, CLK[18])
+tf = box(s, 0.62, 1.80, 8.1, 4.9)
+items = [
+    "Onset prediction is sensitive to fluid characterisation — small input errors move the AOP and therefore the predicted depth.",
+    "Precipitation ≠ deposition: transport/adhesion models are far less mature than the thermodynamics.",
+    "Inhibitor dosage is still chosen largely by trial and error — published criticism: lab validation methods are inadequate, and field results can disappoint [7].",
+    "Injection-point placement is rarely optimised against a predicted onset depth — the case study showed 3,400 ft left unprotected [4].",
+    "No consolidated, public workflow connects screening → onset curve → deposition depth → injection point → dosage → economics.",
+]
+for i, txt in enumerate(items):
+    par(tf, "▪  " + txt, size=13.5, first=(i == 0), space_after=10, line=1.05)
+r, t = rect(s, 8.95, 2.10, 3.77, 3.4, fill=LIGHT, line=TEAL, lw=1.5, shape=MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.06)
+par(t, "THE OPPORTUNITY", size=12.5, bold=True, color=TEAL, first=True, space_after=8)
+par(t, "A transparent, auditable workflow — every assumption visible, every number reproducible — applied end-to-end on a documented well. At Bachelor's level, documented rigour is the contribution.",
+    size=13, color=TEXT, space_after=0, line=1.12)
+notes(s, """TARGET 40 s (clock 11:20).
+[VERIFY] Ref [7] = Fuel 2020 study — 'laboratory methods used to validate effectiveness are inadequate and chemicals are often ineffective or actually worsen the problem in the field.'
+Delivery: this is the pivot from review to research. Say the last box slowly.""")
+
+# =========================================================
+# 19 — PROPOSED PROJECT
+# =========================================================
+s = blank_slide()
+header(s, "PART 5 · TOWARD THE THESIS", "Graduation project: onset and deposition-depth prediction for a real well", 19, 45, CLK[19])
+r, t = rect(s, 0.62, 1.80, 12.1, 1.05, fill=LIGHT, line=NAVY2, lw=1.2, shape=MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.09)
+par(t, "AIM:  build and document a transparent screening → PVT → wellbore workflow that predicts asphaltene onset depth, selects the inhibitor injection point, and quantifies the economics — validated against a documented field case.",
+    size=13.5, bold=True, color=NAVY, first=True, space_after=0, line=1.1)
+r, t = rect(s, 0.62, 3.00, 5.95, 3.1, fill=WHITE, line=TEAL, lw=1.4, shape=MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.05)
+par(t, "RESEARCH QUESTIONS", size=13, bold=True, color=TEAL, first=True, space_after=6)
+for line in [
+    "RQ1  How sensitive is predicted onset depth to fluid characterisation (SARA/CII inputs, EoS choice, AOP data)?",
+    "RQ2  What injection point and dosage window keep the whole tubing above the AOP — with what uncertainty margin?",
+    "RQ3  At what cleanout frequency does continuous inhibition break even for the case well?",
+]:
+    par(t, line, size=13, color=TEXT, space_after=9, line=1.05)
+r, t = rect(s, 6.80, 3.00, 5.92, 3.1, fill=WHITE, line=AMBER, lw=1.4, shape=MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.05)
+par(t, "WORK PACKAGES", size=13, bold=True, color=AMB_D, first=True, space_after=6)
+for line in [
+    "WP1  Fluid screening: SARA, CII, de Boer assessment of the case fluid",
+    "WP2  EoS modelling: asphaltene onset curve (CPA / PC-SAFT class model), tuned to measured AOP",
+    "WP3  Wellbore model: P–T profile → onset depth → injection-point design",
+    "WP4  Economics: breakeven frequency and reactive-vs-proactive comparison",
+]:
+    par(t, line, size=12.5, color=TEXT, space_after=7, line=1.05)
+notes(s, """TARGET 45 s (clock 12:05).
+Delivery: read the AIM; summarise RQs as three one-liners; WP1–WP4 map to the methodology slide.
+Confirm with your supervisor before the seminar that a modelling-based thesis will be accepted — his agreement is your best Q&A shield.""")
+
+# =========================================================
+# 20 — METHODOLOGY
+# =========================================================
+s = blank_slide()
+header(s, "PART 5 · TOWARD THE THESIS", "Methodology: screening → modelling → validation → economics", 20, 50, CLK[20])
+steps = [
+    ("1 · SCREEN", ["SARA + CII + de Boer on published fluid data", "Output: stability verdict and risk flag"], TEAL),
+    ("2 · MODEL", ["Asphaltene onset curve vs temperature (CPA/PC-SAFT-class EoS)", "Tune to any published/measured AOP", "Output: the envelope"], AMB_D),
+    ("3 · PREDICT", ["Wellbore P–T profile → crossing depth", "Sensitivity: ±ΔP, ±AOP, ±GOR", "Output: onset depth + margin"], NAVY2),
+    ("4 · DECIDE", ["Injection point + dosage window", "Breakeven cleanout-frequency model", "Output: decision matrix for the field"], RED),
+]
+x = 0.62
+for lab, lines, col in steps:
+    r, t = rect(s, x, 1.85, 2.94, 4.15, fill=WHITE, line=col, lw=1.6, shape=MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.05)
+    par(t, lab, size=14.5, bold=True, color=col, first=True, space_after=10)
+    for ln in lines:
+        par(t, "▪  " + ln, size=12, color=TEXT, space_after=9, line=1.06)
+    x += 3.10
+tf = box(s, 0.62, 6.15, 12.1, 0.85)
+par(tf, "Tool hierarchy (declared now, so the project never stalls): licensed PVT/flow-assurance software if available (e.g. PVTsim, Multiflash, OLGA/PIPESIM) → open-source fallback (NeqSim — CPA-EoS asphaltene screening, Equinor, Apache-2.0 licence) → correlation-based screening as the floor. [VERIFY] licence availability with the department in Week 1.",
+    size=11.5, italic=True, color=GRAY, first=True, space_after=0, line=1.1)
+notes(s, """TARGET 50 s (clock 12:55).
+Key message: four steps with outputs — and a declared tool hierarchy so no licence situation can kill the project.
+Validation (say it if time allows): reproduce the documented case's observed behaviour — onset deeper than the existing mandrel, ID reduction, dosage window — within a stated tolerance; cross-check onset with NeqSim and correlations.
+[VERIFY] Confirm in Week 1 which licensed tools the department actually has.""")
+
+# =========================================================
+# 21 — TIMELINE, DELIVERABLES, LIMITS
+# =========================================================
+s = blank_slide()
+header(s, "PART 5 · TOWARD THE THESIS", "Deliverables, honest limitations, and a realistic 16-week plan", 21, 40, CLK[21])
+r, t = rect(s, 0.62, 1.85, 3.75, 4.3, fill=WHITE, line=TEAL, lw=1.4, shape=MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.05)
+par(t, "DELIVERABLES", size=13, bold=True, color=TEAL, first=True, space_after=8)
+for ln in ["Thesis with full calculation chain", "Documented prediction workflow (spreadsheet / Python)", "Case-study report: onset depth and injection point", "Breakeven economics model", "Decision matrix: monitor / inhibit / clean out"]:
+    par(t, "▪  " + ln, size=12, color=TEXT, space_after=8, line=1.05)
+r, t = rect(s, 4.55, 1.85, 3.75, 4.3, fill=WHITE, line=RED, lw=1.4, shape=MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.05)
+par(t, "LIMITATIONS (stated up-front)", size=13, bold=True, color=RED, first=True, space_after=8)
+for ln in ["Literature-based fluids — no live sample unless a partner provides one", "Single documented case: conditional conclusions", "Deposition-transport modelling kept first-order", "Steady-state wellbore profiles", "Cost figures indicative, from published ranges"]:
+    par(t, "▪  " + ln, size=12, color=TEXT, space_after=8, line=1.05)
+data = [
+    ["Weeks", "Milestone"],
+    ["1 – 3", "Literature, standards, case selection"],
+    ["4 – 6", "Screen fluid; build the envelope model"],
+    ["7 – 9", "Wellbore model; onset-depth prediction"],
+    ["10 – 11", "Validation against the case; sensitivity"],
+    ["12 – 14", "Economics + thesis writing"],
+    ["15 – 16", "Review, defence preparation"],
+]
+table(s, data, 8.50, 1.85, 4.2, col_w=[1.3, 2.9], fs=11, hfs=11, row_h=0.40)
+notes(s, """TARGET 40 s (clock 13:35).
+Delivery: the limitations list is a strength — deliver it confidently, as a scope contract rather than an apology.""")
+
+# =========================================================
+# 22 — THREE MESSAGES + THANK YOU
+# =========================================================
+s = blank_slide()
+header(s, "CLOSING", "Three messages — then your questions", 22, 40, CLK[22])
+msgs = [
+    ("1", "Asphaltene plugging is a pressure-and-composition story, not a cooling story — and precipitation is not the same as deposition.", RED),
+    ("2", "The decisive number is the depth where the flowing path crosses the onset envelope: it sets the injection point, the mitigation strategy and the money.", AMBER),
+    ("3", "My graduation project builds a transparent screening-to-economics workflow for that depth — validated on a documented field case.", TEAL),
+]
+for i, (num, txt, col) in enumerate(msgs):
+    yy = 1.90 + i * 1.55
+    rect(s, 0.62, yy, 12.1, 1.35, fill=LIGHT, line=None, shape=MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.10)
+for i, (num, txt, col) in enumerate(msgs):
+    yy = 1.90 + i * 1.55
+    nb = box(s, 0.95, yy + 0.30, 0.9, 0.9)
+    par(nb, num, size=38, bold=True, color=col, first=True, space_after=0, align=PP_ALIGN.CENTER)
+    tb = box(s, 1.95, yy + 0.18, 10.5, 1.05)
+    par(tb, txt, size=15, color=NAVY, first=True, space_after=0, line=1.1)
+r, t = rect(s, 0.62, 6.35, 12.1, 0.55, fill=LIGHT2, line=None, shape=MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.18)
+par(t, "Thank you — I am happy to take your questions.", size=14, bold=True, color=NAVY,
+    first=True, space_after=0, align=PP_ALIGN.CENTER)
+notes(s, """TARGET 40 s (clock 14:15) — CONCLUSIONS START HERE, no exceptions.
+Delivery: one message per breath, pause between them; finish with the thank-you line, then STOP TALKING.
+Never cut this slide, even if everything before it had to be compressed.""")
+
+# =========================================================
+# 23 — REFERENCES
+# =========================================================
+s = blank_slide()
+header(s, "CLOSING", "Key references (full list per course citation style)", 23, 10, CLK[23])
+left = [
+    "[1]  ACS Energy & Fuels (2021) — Review of asphaltenes: industry-wide costs; $70 M/well deepwater GoM shut-in.",
+    "[2]  Processes, MDPI (2025) — Mitigation of asphaltene deposition via chemical additives: up to $1.2 M/day deferred production; treatment up to $3 M.",
+    "[3]  SPE-994-PA / JPT (1965) — Hassi Messaoud: deposit composition, 20–25 % WHP loss in 15–20 days, gauge-ring practice.",
+    "[4]  JPT / SPE (2021) — Deepwater GoM well case: 3,400 ft unprotected tubing, ID 2.3→1.35 in, 750→500 ppm, +16 % production.",
+    "[5]  Colloidal Instability Index (CII) screening literature — SARA-based stability index [add exact paper].",
+    "[6]  De Boer et al. (1995) — Screening criteria for asphaltene precipitation; AOP vs bubble point.",
+]
+right = [
+    "[7]  Fuel / ScienceDirect (2020) — Dead-oil re-injection mitigation; critique of inhibitor validation practice [add exact paper].",
+    "[8]  Inhibitor cost ranges: Middle East ($31–46 k/well/yr) vs GoM ($330–390 k/well/yr) — from refs [1], [2].",
+    "[9]  Mullins et al. — The Modified Yen Model (asphaltene nano-aggregates).",
+    "[10] NeqSim (Equinor, Apache-2.0) — open-source CPA-EoS asphaltene screening.",
+    "[11] API / ASTM: D6560 / IP 143 (asphaltene content); D6703 (heptane titration) [verify editions].",
+    "[12] Textbook: Flow Assurance / Production Chemistry course text — [add your course reference].",
+]
+for lines, x in ((left, 0.62), (right, 6.85)):
+    tfx = box(s, x, 1.80, 6.0, 5.0)
+    for i, ln in enumerate(lines):
+        par(tfx, ln, size=11.5, first=(i == 0), space_after=9, line=1.04)
+tf = box(s, 0.62, 6.35, 12.1, 0.6)
+par(tf, "Final version: complete every [add exact] citation and keep slide numbers traceable to this page.",
+    size=11.5, italic=True, color=GRAY, first=True, space_after=0)
+notes(s, """TARGET 10 s (clock 14:25).
+Delivery: do not read. One sentence: "My references are on this slide and in the handout." If behind schedule, skip entirely.""")
+
+# =========================================================
+# 24 — BACKUP 1
+# =========================================================
+s = blank_slide()
+header(s, "BACKUP", "Derivation and assumptions: envelope, indices and the onset-depth model", 24, backup=True)
+tf = box(s, 0.62, 1.80, 12.1, 5.0)
+for i, (a, b) in enumerate([
+    ("CII definition:", "CII = (Saturates + Asphaltenes) / (Resins + Aromatics). Commonly used boundary ≈ 0.9: above it the crude is flagged unstable; below ≈ 0.7 it is generally stable. Thresholds are laboratory-specific."),
+    ("De Boer screening:", "plot AOP against bubble point and reservoir pressure. If AOP > Pb, asphaltene problems are likely; if reservoir pressure < AOP, the oil is unstable everywhere and even the reservoir is at risk."),
+    ("Onset curve model:", "AOP(T) treated as a fluid-specific curve; in the seminar it is a linear approximation for illustration. The thesis replaces it with a tuned EoS (CPA / PC-SAFT class) matched to measured AOP data."),
+    ("Onset-depth model:", "onset depth = depth where flowing pressure P(d) falls below AOP(T(d)). Both profiles are linear approximations here (±); the thesis uses the well's real gradient and multiphase model."),
+    ("Sensitivity plan:", "±50–100 bar on AOP, ±10 % on pressure gradient, ±GOR scenarios: the onset depth moves by hundreds of metres — which is precisely why the injection point needs a margin."),
+    ("What is deliberately excluded:", "time-dependent deposition growth (first-order only), lower-AOP phenomena, and near-wellbore (formation) damage modelling."),
+]):
+    p = par(tf, "▪  " + a, size=13.5, bold=True, color=NAVY, first=(i == 0), space_after=2)
+    par(tf, b, size=12.5, color=TEXT, space_after=10, line=1.04)
+notes(s, "Show only if asked for the maths. The sensitivity line is the most valuable one: it justifies the safety margin on the injection point.")
+
+# =========================================================
+# 25 — BACKUP 2
+# =========================================================
+s = blank_slide()
+header(s, "BACKUP", "Data sources, tools and validation plan", 25, backup=True)
+tf = box(s, 0.62, 1.80, 12.1, 5.0)
+for i, (a, b) in enumerate([
+    ("Fluid data:", "published PVT/SARA reports from case-study literature; field case in JPT/SPE (2021); Hassi Messaoud classic data (SPE-994-PA); other published well databases via the university library."),
+    ("Licensed tools (if available):", "PVT simulator with asphaltene onset (PVTsim / Multiflash / WinProp-class) and a wellbore flow model (OLGA with asphaltene module / PIPESIM). Confirm with the department in Week 1."),
+    ("Open-source fallback:", "NeqSim (Equinor, Apache-2.0) — CPA-EoS asphaltene screening and PVT; Python for the workflow, plots and the economics model."),
+    ("Validation targets:", "reproduce the documented case behaviour — predicted onset below the existing mandrel; ID-reduction trend; dosage within the field's 750→500 ppm window — within a stated tolerance; cross-check onset against correlations."),
+    ("Risk register (top 3):", "(1) no live fluid sample → use published data and declare it; (2) licensed software unavailable → NeqSim + correlations (project already designed for this); (3) case-data conflicts across sources → document the variance and choose conservative values."),
+    ("Ethics & HSE framing:", "aromatic solvents (BTEX) are a workplace-safety topic; the project compares alternatives explicitly and never recommends handling without controls."),
+]):
+    p = par(tf, "▪  " + a, size=13.5, bold=True, color=NAVY, first=(i == 0), space_after=2)
+    par(tf, b, size=12.5, color=TEXT, space_after=10, line=1.04)
+notes(s, "Show only if asked about data, tools or risk. Naming NeqSim and the exact licence fallback is what pre-empts the 'software access' objection.")
+
+prs.core_properties.title = "Asphaltenes: Predicting and Preventing Wellbore Plugging — Seminar"
+prs.core_properties.author = "Prepared for [Your name] — Seminar, BSc Petroleum and Gas Engineering"
+out = "/home/user/Seminar_Asphaltenes/Asphaltene_Slides_23plus2.pptx"
+prs.save(out)
+print("saved", out, "| slides:", len(prs.slides._sldIdLst))
